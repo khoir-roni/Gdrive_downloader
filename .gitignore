@@ -1,0 +1,29 @@
+# Exclude downloaded media and course folders
+downloads/
+kuliah_s2/
+
+# Media formats
+*.jpg
+*.JPG
+*.jpeg
+*.JPEG
+*.png
+*.PNG
+*.mp4
+*.MP4
+*.m4a
+*.M4A
+*.dng
+*.DNG
+*.vtt
+*.part
+
+# Python cache & logs
+__pycache__/
+*.py[cod]
+*.log
+.cache/
+
+# OS specific
+Thumbs.db
+.DS_Store
