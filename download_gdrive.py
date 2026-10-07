@@ -1,3 +1,12 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Google Drive Folder Downloader & Incremental Sync Tool
+======================================================
+Mendownload dan menyinkronkan folder Google Drive secara rekursif.
+Mendukung mode Incremental Sync (--sync) untuk mengunduh hanya file baru/berubah.
+"""
+
 import os
 import re
 import sys
@@ -11,6 +20,20 @@ except ImportError:
     import subprocess
     subprocess.check_call([sys.executable, "-m", "pip", "install", "gdown"])
     import gdown
+
+# Import fungsi sinkronisasi dari sync_gdrive jika ada
+try:
+    from sync_gdrive import sync_folder, DEFAULT_FOLDER_ID, DEFAULT_DESTINATION, MODERN_USER_AGENT
+except ImportError:
+    # Fallback jika dijalankan terpisah
+    DEFAULT_FOLDER_ID = "10sEl0HylyMFCflcrTJ2HGDv3avRqaZAH"
+    DEFAULT_DESTINATION = "kuliah_s2"
+    MODERN_USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/126.0.0.0 Safari/537.36"
+    )
+    sync_folder = None
 
 
 def extract_folder_id(url_or_id: str) -> str:
@@ -26,28 +49,25 @@ def extract_folder_id(url_or_id: str) -> str:
     if match:
         return match.group(1)
     
-    # Jika memasukkan id=... di query parameter
     match_query = re.search(r"[?&]id=([a-zA-Z0-9_-]+)", url_or_id)
     if match_query:
         return match_query.group(1)
 
-    # Asumsi user langsung memasukkan ID
     return url_or_id
 
 
 def download_gdrive_folder(folder_url_or_id: str, output_folder: str = "downloads"):
     """
-    Mendownload folder Google Drive beserta seluruh subfolder dan isinya.
+    Mendownload folder Google Drive beserta seluruh subfolder dan isinya secara standar.
     """
     folder_id = extract_folder_id(folder_url_or_id)
     gdrive_url = f"https://drive.google.com/drive/folders/{folder_id}"
 
-    # Pastikan folder output ada, jika belum ada maka buat folder baru
     abs_output = os.path.abspath(output_folder)
     os.makedirs(abs_output, exist_ok=True)
     
     print("=" * 60)
-    print("Google Drive Folder Downloader")
+    print("Google Drive Folder Downloader (Standard Mode)")
     print("=" * 60)
     print(f"[*] Folder ID    : {folder_id}")
     print(f"[*] Folder URL   : {gdrive_url}")
@@ -56,11 +76,6 @@ def download_gdrive_folder(folder_url_or_id: str, output_folder: str = "download
     print("[*] Memulai download... Harap tunggu, proses ini bergantung pada ukuran data.")
 
     try:
-        modern_user_agent = (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/126.0.0.0 Safari/537.36"
-        )
         downloaded = gdown.download_folder(
             id=folder_id,
             output=abs_output,
@@ -68,7 +83,7 @@ def download_gdrive_folder(folder_url_or_id: str, output_folder: str = "download
             use_cookies=True,
             resume=True,
             retries=5,
-            user_agent=modern_user_agent
+            user_agent=MODERN_USER_AGENT
         )
         
         if downloaded is not None:
@@ -83,32 +98,81 @@ def download_gdrive_folder(folder_url_or_id: str, output_folder: str = "download
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Download folder Google Drive beserta isinya secara rekursif.")
-    parser.add_argument("--url", "-u", type=str, help="URL Google Drive folder atau Folder ID", default=None)
-    parser.add_argument("--output", "-o", type=str, help="Nama/Path folder tujuan penyimpanan", default=None)
+    parser = argparse.ArgumentParser(
+        description="Download atau Sinkronisasi Folder Google Drive secara rekursif."
+    )
+    parser.add_argument(
+        "--url", "-u",
+        type=str,
+        help=f"URL Google Drive folder atau Folder ID (default: Semester I 2026/2027)",
+        default=None
+    )
+    parser.add_argument(
+        "--output", "-o",
+        type=str,
+        help="Nama/Path folder tujuan penyimpanan lokal",
+        default=None
+    )
+    parser.add_argument(
+        "--sync", "-s",
+        action="store_true",
+        help="Gunakan mode Incremental Sync (hanya mengunduh file baru/terupdate, menghemat bandwidth)"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Cek perbandingan file lokal vs Google Drive tanpa mendownload (hanya berlaku pada mode sync)"
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Paksa unduh ulang seluruh file"
+    )
 
     args = parser.parse_args()
 
     url_input = args.url
     output_input = args.output
+    use_sync = args.sync
 
     # Mode interaktif jika argumen tidak diberikan lewat CLI
-    if not url_input:
-        print("=" * 60)
-        print("  GOOGLE DRIVE FOLDER DOWNLOADER")
-        print("=" * 60)
-        url_input = input("Masukkan URL Folder Google Drive atau Folder ID:\n> ").strip()
+    if not url_input and not output_input and not use_sync:
+        print("=" * 65)
+        print("       GOOGLE DRIVE DOWNLOADER & SYNC TOOL")
+        print("=" * 65)
+        print("Pilih Mode Pengoperasian:")
+        print("  1. Incremental Sync (SANGAT DIREKOMENDASIKAN)")
+        print("     -> Hanya unduh file baru atau yang belum ada di lokal.")
+        print("  2. Standard / Full Download")
+        print("     -> Unduh folder secara konvensional.")
+        print("=" * 65)
+        mode_choice = input("Pilihan mode (1 atau 2, default: 1): ").strip()
+        use_sync = False if mode_choice == "2" else True
 
-    if not url_input:
-        print("[X] URL atau Folder ID tidak boleh kosong!")
-        sys.exit(1)
+        default_url_hint = f"tekan Enter untuk default 'Semester I 2026/2027' [{DEFAULT_FOLDER_ID}]"
+        url_input = input(f"Masukkan URL Folder Google Drive atau Folder ID\n({default_url_hint}):\n> ").strip()
+        if not url_input:
+            url_input = DEFAULT_FOLDER_ID
 
-    if not output_input:
-        folder_default = "downloads"
-        custom_folder = input(f"Masukkan nama folder penyimpanan (tekan Enter untuk default '{folder_default}'):\n> ").strip()
-        output_input = custom_folder if custom_folder else folder_default
+        default_out = DEFAULT_DESTINATION if use_sync else "downloads"
+        custom_folder = input(f"Masukkan nama folder penyimpanan (tekan Enter untuk default '{default_out}'):\n> ").strip()
+        output_input = custom_folder if custom_folder else default_out
+    else:
+        # Fallback default jika tidak ada url
+        if not url_input:
+            url_input = DEFAULT_FOLDER_ID
+        if not output_input:
+            output_input = DEFAULT_DESTINATION if use_sync else "downloads"
 
-    download_gdrive_folder(url_input, output_input)
+    if use_sync and sync_folder is not None:
+        sync_folder(
+            folder_url_or_id=url_input,
+            destination_dir=output_input,
+            dry_run=args.dry_run,
+            force=args.force
+        )
+    else:
+        download_gdrive_folder(url_input, output_input)
 
 
 if __name__ == "__main__":

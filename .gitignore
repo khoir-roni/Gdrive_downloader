@@ -23,6 +23,8 @@ __pycache__/
 *.py[cod]
 *.log
 .cache/
+*.manifest.json
+.sync_manifest.json
 
 # OS specific
 Thumbs.db
